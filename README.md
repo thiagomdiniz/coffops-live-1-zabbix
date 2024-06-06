@@ -3,6 +3,8 @@
 This repository contains the code I used in a live on the Coffops YouTube Channel:
 - https://www.youtube.com/watch?v=3-UOVAbMyU4
 
+We installed Zabbix with Docker Compose and used PostgreSQL with the TimescaleDB extension as the database.
+
 ## Doc reference
 
 - Zabbix
@@ -21,7 +23,7 @@ This repository contains the code I used in a live on the Coffops YouTube Channe
 
 - `cd zabbix-docker`
 - Put DB user in file `./env_vars/.POSTGRES_USER`
-- Puts DB password in file `./env_vars/.POSTGRES_PASSWORD`
+- Put DB password in file `./env_vars/.POSTGRES_PASSWORD`
 - Set files permissions:
     ```
     sudo chown 70:1995 env_vars/.POSTGRES_*
