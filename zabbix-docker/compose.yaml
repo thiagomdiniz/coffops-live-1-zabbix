@@ -1,0 +1,160 @@
+#https://docs.docker.com/compose/compose-file/
+
+services:
+
+  zabbix-server:
+    image: "${ZABBIX_SERVER_IMAGE}:${ZABBIX_IMAGE_TAG}${ZABBIX_IMAGE_TAG_POSTFIX}"
+    ports:
+      - "${ZABBIX_SERVER_PORT}:10051"
+    restart: "${RESTART_POLICY}"
+    volumes:
+      - /etc/localtime:/etc/localtime:ro
+      - ${DATA_DIRECTORY}/usr/lib/zabbix/alertscripts:/usr/lib/zabbix/alertscripts:ro
+      - ${DATA_DIRECTORY}/usr/lib/zabbix/externalscripts:/usr/lib/zabbix/externalscripts:ro
+      - ${DATA_DIRECTORY}/var/lib/zabbix/dbscripts:/var/lib/zabbix/dbscripts:ro
+      - ${DATA_DIRECTORY}/var/lib/zabbix/export:/var/lib/zabbix/export:rw
+      - ${DATA_DIRECTORY}/var/lib/zabbix/modules:/var/lib/zabbix/modules:ro
+      - ${DATA_DIRECTORY}/var/lib/zabbix/enc:/var/lib/zabbix/enc:ro
+      - ${DATA_DIRECTORY}/var/lib/zabbix/ssh_keys:/var/lib/zabbix/ssh_keys:ro
+      - ${DATA_DIRECTORY}/var/lib/zabbix/mibs:/var/lib/zabbix/mibs:ro
+      - snmptraps:/var/lib/zabbix/snmptraps:ro
+    tmpfs:
+      - /tmp:size=${TMPFS_MOUNT_SIZE_LIMIT}
+    ulimits:
+      nproc: 65535
+      nofile:
+        soft: 20000
+        hard: 40000
+    env_file:
+      - ${ENV_VARS_DIRECTORY}/.env_srv
+      - ${ENV_VARS_DIRECTORY}/.env_db_pgsql
+    secrets:
+      - POSTGRES_USER
+      - POSTGRES_PASSWORD
+    # depends_on:
+    #   - postgres-server
+    networks:
+      backend:
+      database:
+      frontend:
+        ipv4_address: ${ZABBIX_SERVER_FRONTEND_IP}
+    stop_grace_period: 30s
+    sysctls: #https://docs.docker.com/reference/cli/docker/container/run/#sysctl
+      - net.ipv4.ip_local_port_range=1024 64999
+      - net.ipv4.conf.all.accept_redirects=0 #the system will not accept any ICMP redirect messages, and therefore, won't allow outsiders to update the system's routing tables
+      - net.ipv4.conf.all.secure_redirects=0 #protects the system from routing table updates by possibly compromised known gateways
+      - net.ipv4.conf.all.send_redirects=0 #ICMP Redirects are used to send routing information to other hosts.
+
+  zabbix-web:
+    image: "${ZABBIX_WEB_IMAGE}:${ZABBIX_IMAGE_TAG}${ZABBIX_IMAGE_TAG_POSTFIX}"
+    ports:
+      - "${ZABBIX_WEB_NGINX_HTTP_PORT}:8080"
+      - "${ZABBIX_WEB_NGINX_HTTPS_PORT}:8443"
+    restart: "${RESTART_POLICY}"
+    volumes:
+      - /etc/localtime:/etc/localtime:ro
+      - ${DATA_DIRECTORY}/etc/ssl/nginx:/etc/ssl/nginx:ro
+      - ${DATA_DIRECTORY}/usr/share/zabbix/modules/:/usr/share/zabbix/modules/:ro
+    tmpfs:
+      - /tmp:size=${TMPFS_MOUNT_SIZE_LIMIT}
+    env_file:
+      - ${ENV_VARS_DIRECTORY}/.env_web
+      - ${ENV_VARS_DIRECTORY}/.env_db_pgsql
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    secrets:
+      - POSTGRES_USER
+      - POSTGRES_PASSWORD
+    # depends_on:
+    #   - postgres-server
+    networks:
+      backend:
+      database:
+      frontend:
+    stop_grace_period: 10s
+    sysctls:
+      - net.core.somaxconn=65535 #(only needed on highloaded servers)maximum length of the queue of pending connections that are waiting to be accepted by the system
+  
+  zabbix-web-service:
+    image: "${ZABBIX_WEB_SERVICE_IMAGE}:${ZABBIX_IMAGE_TAG}${ZABBIX_IMAGE_TAG_POSTFIX}"
+    ports:
+      - "${ZABBIX_WEB_SERVICE_PORT}:10053"
+    restart: "${RESTART_POLICY}"
+    volumes:
+      - /etc/localtime:/etc/localtime:ro
+      - ${DATA_DIRECTORY}/var/lib/zabbix/enc:/var/lib/zabbix/enc:ro
+    tmpfs:
+      - /tmp:size=${TMPFS_MOUNT_SIZE_LIMIT}
+    security_opt:
+      - seccomp:${ENV_VARS_DIRECTORY}/chrome_dp.json #Specify a Docker security profile for Chrome, avoiding "Operation not permitted" error
+    env_file:
+      - ${ENV_VARS_DIRECTORY}/.env_web_service
+    networks:
+      backend:
+    stop_grace_period: 5s
+  
+  postgres-server:
+    image: "${POSTGRESQL_IMAGE}:${POSTGRESQL_IMAGE_TAG}"
+    #command: -c ssl=on -c ssl_cert_file=/run/secrets/server-cert.pem -c ssl_key_file=/run/secrets/server-key.pem -c ssl_ca_file=/run/secrets/root-ca.pem
+    profiles:
+      - dev
+    restart: "${RESTART_POLICY}"
+    volumes:
+      - /etc/localtime:/etc/localtime:ro
+      - pgdata:/var/lib/postgresql/data:rw
+      #- ${DATA_DIRECTORY}/var/lib/postgresql/data:/var/lib/postgresql/data:rw
+      # - ${ENV_VARS_DIRECTORY}/.ZBX_DB_CA_FILE:/run/secrets/root-ca.pem:ro
+      # - ${ENV_VARS_DIRECTORY}/.ZBX_DB_CERT_FILE:/run/secrets/server-cert.pem:ro
+      # - ${ENV_VARS_DIRECTORY}/.ZBX_DB_KEY_FILE:/run/secrets/server-key.pem:ro
+    env_file:
+      - ${ENV_VARS_DIRECTORY}/.env_db_pgsql
+    secrets:
+      - POSTGRES_USER
+      - POSTGRES_PASSWORD
+    stop_grace_period: 1m
+    networks:
+      database:
+  
+  mail-server:
+    image: "${MAIL_FAKE_IMAGE}:${MAIL_FAKE_IMAGE_TAG}"
+    profiles:
+      - dev
+    ports:
+      - "${MAIL_FAKE_HTTP_PORT}:1080"
+      # - "${MAIL_FAKE_SMTP_PORT}:1025"
+    volumes:
+      - /etc/localtime:/etc/localtime:ro
+    restart: "${RESTART_POLICY}"
+    networks:
+      backend:
+      frontend:
+
+networks:
+  frontend:
+    driver: bridge
+    ipam:
+      config:
+      - subnet: "${FRONTEND_SUBNET}"
+  backend:
+    driver: bridge
+    internal: true
+    ipam:
+      config:
+      - subnet: "${BACKEND_SUBNET}"
+  database:
+    driver: bridge
+    internal: true
+
+volumes:
+  snmptraps:
+  pgdata:
+
+secrets:
+  POSTGRES_USER:
+    file: ${ENV_VARS_DIRECTORY}/.POSTGRES_USER
+  POSTGRES_PASSWORD:
+    file: ${ENV_VARS_DIRECTORY}/.POSTGRES_PASSWORD
